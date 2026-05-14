@@ -1,17 +1,18 @@
 ﻿// ======================================================
-// 蜘蛛纸牌 PNG 豪华动画终极版
+// 蜘蛛纸牌 豪华终极完整版
 // VS2022 + EasyX
 //
 // 功能：
 // 1. PNG透明扑克（无黑边）
-// 2. 真拖拽
-// 3. 丝滑移动动画
-// 4. 发牌
-// 5. 撤回 Ctrl+Z
-// 6. 自动收完整序列
-// 7. 胜利检测
-// 8. UI按钮
-// 9. 正版蜘蛛纸牌布局
+// 2. 半透明拖拽
+// 3. 翻牌动画
+// 4. 丝滑移动动画
+// 5. 发牌按钮
+// 6. 撤回按钮
+// 7. Ctrl+Z撤回
+// 8. 自动收完整序列
+// 9. 胜利检测
+// 10. 正版蜘蛛纸牌布局
 // ======================================================
 
 #include <graphics.h>
@@ -22,6 +23,7 @@
 #include <cstdlib>
 #include <cwchar>
 #include <stack>
+#include <windows.h>
 
 using namespace std;
 
@@ -37,17 +39,23 @@ struct Card
 };
 
 // ======================================================
-// 撤回记录
+// 翻牌动画
 // ======================================================
 
-struct MoveRecord
+struct FlipAnim
 {
-    vector<Card> cols[10];
-    vector<Card> deck;
+    bool active = false;
+
+    int col;
+    int index;
+
+    float progress = 0;
 };
 
+FlipAnim flipAnim;
+
 // ======================================================
-// 动画
+// 移动动画
 // ======================================================
 
 struct MoveAnimation
@@ -62,9 +70,21 @@ struct MoveAnimation
     int toX;
     int toY;
 
-    float progress = 0.0f;
+    float progress = 0;
 
     int targetCol;
+};
+
+MoveAnimation anim;
+
+// ======================================================
+// 撤回记录
+// ======================================================
+
+struct MoveRecord
+{
+    vector<Card> cols[10];
+    vector<Card> deck;
 };
 
 // ======================================================
@@ -94,8 +114,6 @@ vector<Card> deck;
 
 stack<MoveRecord> undoStack;
 
-MoveAnimation anim;
-
 // 图片
 IMAGE cardImages[4][14];
 
@@ -122,7 +140,12 @@ int offsetY = 0;
 // PNG透明绘制
 // ======================================================
 
-void drawPNG(IMAGE* img, int x, int y)
+void drawPNG(
+    IMAGE* img,
+    int x,
+    int y,
+    BYTE alpha = 255
+)
 {
     DWORD* dst = GetImageBuffer();
 
@@ -153,10 +176,12 @@ void drawPNG(IMAGE* img, int x, int y)
             DWORD srcColor =
                 draw[iy * w + ix];
 
-            BYTE alpha =
+            BYTE srcA =
                 (srcColor >> 24) & 0xff;
 
-            if (alpha > 0)
+            srcA = srcA * alpha / 255;
+
+            if (srcA > 0)
             {
                 dst[dstY * dstW + dstX] =
                     srcColor;
@@ -278,7 +303,9 @@ void createDeck()
         {
             for (int r = 1; r <= 13; r++)
             {
-                deck.push_back({ s,r,false });
+                deck.push_back(
+                    { s,r,false }
+                );
             }
         }
     }
@@ -299,7 +326,7 @@ void shuffleDeck()
 }
 
 // ======================================================
-// 初始化游戏
+// 初始化
 // ======================================================
 
 void initGame()
@@ -313,7 +340,6 @@ void initGame()
         columns[i].clear();
     }
 
-    // 前4列6张
     for (int i = 0; i < 4; i++)
     {
         for (int j = 0; j < 6; j++)
@@ -326,7 +352,6 @@ void initGame()
         }
     }
 
-    // 后6列5张
     for (int i = 4; i < 10; i++)
     {
         for (int j = 0; j < 5; j++)
@@ -339,7 +364,6 @@ void initGame()
         }
     }
 
-    // 翻开最后一张
     for (int i = 0; i < COLS; i++)
     {
         columns[i].back().isUp = true;
@@ -347,7 +371,7 @@ void initGame()
 }
 
 // ======================================================
-// 计算Y坐标
+// 计算Y
 // ======================================================
 
 int calcCardY(int col, int index)
@@ -369,12 +393,19 @@ int calcCardY(int col, int index)
 // 绘制扑克
 // ======================================================
 
-void drawCard(int x, int y, Card& c, bool selected)
+void drawCard(
+    int x,
+    int y,
+    Card& c,
+    bool selected,
+    BYTE alpha = 255
+)
 {
     drawPNG(
         &cardImages[c.suit][c.rank],
         x,
-        y
+        y,
+        alpha
     );
 
     if (selected)
@@ -399,7 +430,10 @@ void drawCard(int x, int y, Card& c, bool selected)
 // 绘制背面
 // ======================================================
 
-void drawBack(int x, int y)
+void drawBack(
+    int x,
+    int y
+)
 {
     drawPNG(
         &backImage,
@@ -432,7 +466,6 @@ void drawBackground()
         70
     );
 
-    // 标题
     settextcolor(WHITE);
 
     settextstyle(
@@ -444,7 +477,7 @@ void drawBackground()
     outtextxy(
         20,
         15,
-        L"蜘蛛纸牌 豪华动画版"
+        L"蜘蛛纸牌 豪华终极版"
     );
 
     // 发牌按钮
@@ -500,7 +533,61 @@ void drawBackground()
 }
 
 // ======================================================
-// 绘制拖拽牌
+// 翻牌动画
+// ======================================================
+
+void drawFlipAnimation()
+{
+    if (!flipAnim.active)
+        return;
+
+    Card& c =
+        columns[flipAnim.col]
+        [flipAnim.index];
+
+    int x =
+        START_X +
+        flipAnim.col * GAP_X;
+
+    int y =
+        calcCardY(
+            flipAnim.col,
+            flipAnim.index
+        );
+
+    float t =
+        flipAnim.progress;
+
+    int w;
+
+    if (t < 0.5f)
+    {
+        w =
+            CARD_W *
+            (1 - t * 2);
+
+        drawBack(
+            x + (CARD_W - w) / 2,
+            y
+        );
+    }
+    else
+    {
+        w =
+            CARD_W *
+            ((t - 0.5f) * 2);
+
+        drawCard(
+            x + (CARD_W - w) / 2,
+            y,
+            c,
+            false
+        );
+    }
+}
+
+// ======================================================
+// 半透明拖拽
 // ======================================================
 
 void drawDraggingCards()
@@ -508,9 +595,11 @@ void drawDraggingCards()
     if (!dragging)
         return;
 
-    int x = mouseX - offsetX;
+    int x =
+        mouseX - offsetX;
 
-    int y = mouseY - offsetY;
+    int y =
+        mouseY - offsetY;
 
     for (int i = 0; i < dragCards.size(); i++)
     {
@@ -518,13 +607,14 @@ void drawDraggingCards()
             x,
             y + i * 38,
             dragCards[i],
-            true
+            true,
+            180
         );
     }
 }
 
 // ======================================================
-// 绘制移动动画
+// 移动动画
 // ======================================================
 
 void drawAnimation()
@@ -532,10 +622,11 @@ void drawAnimation()
     if (!anim.active)
         return;
 
-    float t = anim.progress;
+    float t =
+        anim.progress;
 
-    // EaseOut
-    t = 1 - (1 - t) * (1 - t);
+    t =
+        1 - (1 - t) * (1 - t);
 
     int x =
         anim.fromX +
@@ -569,13 +660,6 @@ void drawGame()
         int x =
             START_X + c * GAP_X;
 
-        rectangle(
-            x,
-            START_Y,
-            x + CARD_W,
-            START_Y + CARD_H
-        );
-
         for (int i = 0; i < columns[c].size(); i++)
         {
             bool hidden = false;
@@ -604,7 +688,10 @@ void drawGame()
             }
             else
             {
-                drawBack(x, y);
+                drawBack(
+                    x,
+                    y
+                );
             }
         }
     }
@@ -612,10 +699,12 @@ void drawGame()
     drawDraggingCards();
 
     drawAnimation();
+
+    drawFlipAnimation();
 }
 
 // ======================================================
-// 连续序列检测
+// 连续检测
 // ======================================================
 
 bool validSequence(
@@ -635,7 +724,8 @@ bool validSequence(
         Card b =
             columns[col][i + 1];
 
-        if (!a.isUp || !b.isUp)
+        if (!a.isUp ||
+            !b.isUp)
             return false;
 
         if (a.suit != b.suit)
@@ -649,7 +739,7 @@ bool validSequence(
 }
 
 // ======================================================
-// 检查移动
+// 是否能移动
 // ======================================================
 
 bool canMove(
@@ -661,13 +751,15 @@ bool canMove(
     if (from == to)
         return false;
 
-    if (!validSequence(from, start))
+    if (!validSequence(
+        from,
+        start
+    ))
         return false;
 
     Card moving =
         columns[from][start];
 
-    // 空列只能放K
     if (columns[to].empty())
     {
         return moving.rank == 13;
@@ -750,7 +842,55 @@ bool checkWin()
 }
 
 // ======================================================
-// 移动牌（动画版）
+// 发牌
+// ======================================================
+
+void dealNewCards()
+{
+    for (int i = 0; i < COLS; i++)
+    {
+        if (columns[i].empty())
+        {
+            MessageBox(
+                GetHWnd(),
+                L"有空列不能发牌！",
+                L"提示",
+                MB_OK
+            );
+
+            return;
+        }
+    }
+
+    if (deck.size() < 10)
+    {
+        MessageBox(
+            GetHWnd(),
+            L"牌堆为空！",
+            L"提示",
+            MB_OK
+        );
+
+        return;
+    }
+
+    saveState();
+
+    for (int i = 0; i < COLS; i++)
+    {
+        Card c =
+            deck.back();
+
+        deck.pop_back();
+
+        c.isUp = true;
+
+        columns[i].push_back(c);
+    }
+}
+
+// ======================================================
+// 移动牌
 // ======================================================
 
 void moveCards(
@@ -774,20 +914,19 @@ void moveCards(
         );
     }
 
-    // 动画起点
     anim.fromX =
         START_X + from * GAP_X;
 
     anim.fromY =
         calcCardY(from, start);
 
-    // 动画终点
     anim.toX =
         START_X + to * GAP_X;
 
     if (columns[to].empty())
     {
-        anim.toY = START_Y;
+        anim.toY =
+            START_Y;
     }
     else
     {
@@ -798,23 +937,38 @@ void moveCards(
             );
     }
 
-    anim.cards = temp;
+    anim.cards =
+        temp;
 
-    anim.progress = 0.0f;
+    anim.progress =
+        0;
 
-    anim.active = true;
+    anim.active =
+        true;
 
-    anim.targetCol = to;
+    anim.targetCol =
+        to;
 
-    // 删除原位置
     columns[from].erase(
         columns[from].begin() + start,
         columns[from].end()
     );
 
-    // 翻开新牌
+    // 翻牌动画
     if (!columns[from].empty())
     {
+        if (!columns[from].back().isUp)
+        {
+            flipAnim.active = true;
+
+            flipAnim.col = from;
+
+            flipAnim.index =
+                columns[from].size() - 1;
+
+            flipAnim.progress = 0;
+        }
+
         columns[from]
             .back()
             .isUp = true;
@@ -822,55 +976,13 @@ void moveCards(
 }
 
 // ======================================================
-// 发牌
-// ======================================================
-
-void dealNewCards()
-{
-    for (int i = 0; i < COLS; i++)
-    {
-        if (columns[i].empty())
-        {
-            MessageBox(
-                GetHWnd(),
-                L"有空列不能发牌！",
-                L"提示",
-                MB_OK
-            );
-            return;
-        }
-    }
-
-    if (deck.size() < 10)
-    {
-        MessageBox(
-            GetHWnd(),
-            L"牌堆为空！",
-            L"提示",
-            MB_OK
-        );
-        return;
-    }
-
-    saveState();
-
-    for (int i = 0; i < COLS; i++)
-    {
-        Card c = deck.back();
-
-        deck.pop_back();
-
-        c.isUp = true;
-
-        columns[i].push_back(c);
-    }
-}
-
-// ======================================================
 // 点击牌
 // ======================================================
 
-bool clickCard(int mx, int my)
+bool clickCard(
+    int mx,
+    int my
+)
 {
     for (int c = COLS - 1; c >= 0; c--)
     {
@@ -955,7 +1067,10 @@ int getColumn(int mx)
 
 int main()
 {
-    initgraph(WIDTH, HEIGHT);
+    initgraph(
+        WIDTH,
+        HEIGHT
+    );
 
     BeginBatchDraw();
 
@@ -994,25 +1109,36 @@ int main()
             }
         }
 
-        // 更新动画
+        // 更新移动动画
         if (anim.active)
         {
             anim.progress += 0.08f;
 
-            if (anim.progress >= 1.0f)
+            if (anim.progress >= 1)
             {
-                anim.progress = 1.0f;
+                anim.progress = 1;
 
-                // 动画结束
                 for (auto& c : anim.cards)
                 {
-                    columns[anim.targetCol]
+                    columns
+                        [anim.targetCol]
                         .push_back(c);
                 }
 
                 autoRemove();
 
                 anim.active = false;
+            }
+        }
+
+        // 更新翻牌动画
+        if (flipAnim.active)
+        {
+            flipAnim.progress += 0.08f;
+
+            if (flipAnim.progress >= 1)
+            {
+                flipAnim.active = false;
             }
         }
 
