@@ -1,14 +1,17 @@
 ﻿// ======================================================
-// 蜘蛛纸牌 PNG 豪华完整版
-// 功能：
-// 1. PNG扑克牌
-// 2. 真拖拽
-// 3. 发牌
-// 4. 撤回（Ctrl+Z）
-// 5. 自动收完整序列
-// 6. 胜利检测
-// 7. 鼠标UI按钮
+// 蜘蛛纸牌 PNG 豪华动画终极版
 // VS2022 + EasyX
+//
+// 功能：
+// 1. PNG透明扑克（无黑边）
+// 2. 真拖拽
+// 3. 丝滑移动动画
+// 4. 发牌
+// 5. 撤回 Ctrl+Z
+// 6. 自动收完整序列
+// 7. 胜利检测
+// 8. UI按钮
+// 9. 正版蜘蛛纸牌布局
 // ======================================================
 
 #include <graphics.h>
@@ -34,7 +37,7 @@ struct Card
 };
 
 // ======================================================
-// 操作记录（撤回）
+// 撤回记录
 // ======================================================
 
 struct MoveRecord
@@ -44,7 +47,28 @@ struct MoveRecord
 };
 
 // ======================================================
-// 全局参数
+// 动画
+// ======================================================
+
+struct MoveAnimation
+{
+    bool active = false;
+
+    vector<Card> cards;
+
+    int fromX;
+    int fromY;
+
+    int toX;
+    int toY;
+
+    float progress = 0.0f;
+
+    int targetCol;
+};
+
+// ======================================================
+// 参数
 // ======================================================
 
 const int WIDTH = 1600;
@@ -59,10 +83,9 @@ const int START_X = 40;
 const int START_Y = 100;
 
 const int GAP_X = 150;
-const int GAP_Y = 32;
 
 // ======================================================
-// 游戏数据
+// 全局变量
 // ======================================================
 
 vector<Card> columns[COLS];
@@ -70,6 +93,8 @@ vector<Card> columns[COLS];
 vector<Card> deck;
 
 stack<MoveRecord> undoStack;
+
+MoveAnimation anim;
 
 // 图片
 IMAGE cardImages[4][14];
@@ -82,16 +107,66 @@ bool dragging = false;
 vector<Card> dragCards;
 
 int dragFromCol = -1;
+
 int dragStartIndex = -1;
 
 int mouseX = 0;
+
 int mouseY = 0;
 
 int offsetX = 0;
+
 int offsetY = 0;
 
 // ======================================================
-// 保存撤回
+// PNG透明绘制
+// ======================================================
+
+void drawPNG(IMAGE* img, int x, int y)
+{
+    DWORD* dst = GetImageBuffer();
+
+    DWORD* draw = GetImageBuffer(img);
+
+    int w = img->getwidth();
+
+    int h = img->getheight();
+
+    int dstW = getwidth();
+
+    int dstH = getheight();
+
+    for (int iy = 0; iy < h; iy++)
+    {
+        for (int ix = 0; ix < w; ix++)
+        {
+            int dstX = x + ix;
+
+            int dstY = y + iy;
+
+            if (dstX < 0 || dstX >= dstW ||
+                dstY < 0 || dstY >= dstH)
+            {
+                continue;
+            }
+
+            DWORD srcColor =
+                draw[iy * w + ix];
+
+            BYTE alpha =
+                (srcColor >> 24) & 0xff;
+
+            if (alpha > 0)
+            {
+                dst[dstY * dstW + dstX] =
+                    srcColor;
+            }
+        }
+    }
+}
+
+// ======================================================
+// 保存状态
 // ======================================================
 
 void saveState()
@@ -117,7 +192,8 @@ void undo()
     if (undoStack.empty())
         return;
 
-    MoveRecord rec = undoStack.top();
+    MoveRecord rec =
+        undoStack.top();
 
     undoStack.pop();
 
@@ -216,7 +292,10 @@ void shuffleDeck()
 {
     srand((unsigned)time(NULL));
 
-    random_shuffle(deck.begin(), deck.end());
+    random_shuffle(
+        deck.begin(),
+        deck.end()
+    );
 }
 
 // ======================================================
@@ -239,7 +318,9 @@ void initGame()
     {
         for (int j = 0; j < 6; j++)
         {
-            columns[i].push_back(deck.back());
+            columns[i].push_back(
+                deck.back()
+            );
 
             deck.pop_back();
         }
@@ -250,7 +331,9 @@ void initGame()
     {
         for (int j = 0; j < 5; j++)
         {
-            columns[i].push_back(deck.back());
+            columns[i].push_back(
+                deck.back()
+            );
 
             deck.pop_back();
         }
@@ -264,22 +347,44 @@ void initGame()
 }
 
 // ======================================================
-// 绘制牌
+// 计算Y坐标
+// ======================================================
+
+int calcCardY(int col, int index)
+{
+    int y = START_Y;
+
+    for (int i = 0; i < index; i++)
+    {
+        if (columns[col][i].isUp)
+            y += 38;
+        else
+            y += 16;
+    }
+
+    return y;
+}
+
+// ======================================================
+// 绘制扑克
 // ======================================================
 
 void drawCard(int x, int y, Card& c, bool selected)
 {
-    putimage(
+    drawPNG(
+        &cardImages[c.suit][c.rank],
         x,
-        y,
-        &cardImages[c.suit][c.rank]
+        y
     );
 
     if (selected)
     {
         setlinecolor(YELLOW);
 
-        setlinestyle(PS_SOLID, 4);
+        setlinestyle(
+            PS_SOLID,
+            4
+        );
 
         rectangle(
             x - 2,
@@ -291,12 +396,16 @@ void drawCard(int x, int y, Card& c, bool selected)
 }
 
 // ======================================================
-// 背面
+// 绘制背面
 // ======================================================
 
 void drawBack(int x, int y)
 {
-    putimage(x, y, &backImage);
+    drawPNG(
+        &backImage,
+        x,
+        y
+    );
 }
 
 // ======================================================
@@ -305,28 +414,43 @@ void drawBack(int x, int y)
 
 void drawBackground()
 {
-    setbkcolor(RGB(20, 100, 40));
+    setbkcolor(
+        RGB(20, 120, 40)
+    );
 
     cleardevice();
 
     // 顶栏
-    setfillcolor(RGB(10, 70, 30));
+    setfillcolor(
+        RGB(10, 70, 30)
+    );
 
-    solidrectangle(0, 0, WIDTH, 70);
+    solidrectangle(
+        0,
+        0,
+        WIDTH,
+        70
+    );
 
     // 标题
     settextcolor(WHITE);
 
-    settextstyle(34, 0, L"微软雅黑");
+    settextstyle(
+        34,
+        0,
+        L"微软雅黑"
+    );
 
     outtextxy(
         20,
         15,
-        L"蜘蛛纸牌 PNG 豪华版"
+        L"蜘蛛纸牌 豪华动画版"
     );
 
     // 发牌按钮
-    setfillcolor(RGB(40, 40, 40));
+    setfillcolor(
+        RGB(40, 40, 40)
+    );
 
     solidroundrect(
         WIDTH - 340,
@@ -369,8 +493,8 @@ void drawBackground()
     );
 
     outtextxy(
-        600,
-        20,
+        650,
+        18,
         txt
     );
 }
@@ -392,9 +516,42 @@ void drawDraggingCards()
     {
         drawCard(
             x,
-            y + i * GAP_Y,
+            y + i * 38,
             dragCards[i],
             true
+        );
+    }
+}
+
+// ======================================================
+// 绘制移动动画
+// ======================================================
+
+void drawAnimation()
+{
+    if (!anim.active)
+        return;
+
+    float t = anim.progress;
+
+    // EaseOut
+    t = 1 - (1 - t) * (1 - t);
+
+    int x =
+        anim.fromX +
+        (anim.toX - anim.fromX) * t;
+
+    int y =
+        anim.fromY +
+        (anim.toY - anim.fromY) * t;
+
+    for (int i = 0; i < anim.cards.size(); i++)
+    {
+        drawCard(
+            x,
+            y + i * 38,
+            anim.cards[i],
+            false
         );
     }
 }
@@ -409,7 +566,8 @@ void drawGame()
 
     for (int c = 0; c < COLS; c++)
     {
-        int x = START_X + c * GAP_X;
+        int x =
+            START_X + c * GAP_X;
 
         rectangle(
             x,
@@ -432,7 +590,8 @@ void drawGame()
             if (hidden)
                 continue;
 
-            int y = START_Y + i * GAP_Y;
+            int y =
+                calcCardY(c, i);
 
             if (columns[c][i].isUp)
             {
@@ -451,19 +610,30 @@ void drawGame()
     }
 
     drawDraggingCards();
+
+    drawAnimation();
 }
 
 // ======================================================
-// 连续序列
+// 连续序列检测
 // ======================================================
 
-bool validSequence(int col, int start)
+bool validSequence(
+    int col,
+    int start
+)
 {
-    for (int i = start; i < columns[col].size() - 1; i++)
+    for (
+        int i = start;
+        i < columns[col].size() - 1;
+        i++
+        )
     {
-        Card a = columns[col][i];
+        Card a =
+            columns[col][i];
 
-        Card b = columns[col][i + 1];
+        Card b =
+            columns[col][i + 1];
 
         if (!a.isUp || !b.isUp)
             return false;
@@ -482,7 +652,11 @@ bool validSequence(int col, int start)
 // 检查移动
 // ======================================================
 
-bool canMove(int from, int start, int to)
+bool canMove(
+    int from,
+    int start,
+    int to
+)
 {
     if (from == to)
         return false;
@@ -490,7 +664,8 @@ bool canMove(int from, int start, int to)
     if (!validSequence(from, start))
         return false;
 
-    Card moving = columns[from][start];
+    Card moving =
+        columns[from][start];
 
     // 空列只能放K
     if (columns[to].empty())
@@ -498,13 +673,15 @@ bool canMove(int from, int start, int to)
         return moving.rank == 13;
     }
 
-    Card target = columns[to].back();
+    Card target =
+        columns[to].back();
 
-    return target.rank == moving.rank + 1;
+    return target.rank ==
+        moving.rank + 1;
 }
 
 // ======================================================
-// 自动收完整序列
+// 自动收牌
 // ======================================================
 
 void autoRemove()
@@ -549,7 +726,9 @@ void autoRemove()
 
             if (!columns[c].empty())
             {
-                columns[c].back().isUp = true;
+                columns[c]
+                    .back()
+                    .isUp = true;
             }
         }
     }
@@ -571,36 +750,75 @@ bool checkWin()
 }
 
 // ======================================================
-// 移动牌
+// 移动牌（动画版）
 // ======================================================
 
-void moveCards(int from, int start, int to)
+void moveCards(
+    int from,
+    int start,
+    int to
+)
 {
     saveState();
 
     vector<Card> temp;
 
-    for (int i = start; i < columns[from].size(); i++)
+    for (
+        int i = start;
+        i < columns[from].size();
+        i++
+        )
     {
-        temp.push_back(columns[from][i]);
+        temp.push_back(
+            columns[from][i]
+        );
     }
 
+    // 动画起点
+    anim.fromX =
+        START_X + from * GAP_X;
+
+    anim.fromY =
+        calcCardY(from, start);
+
+    // 动画终点
+    anim.toX =
+        START_X + to * GAP_X;
+
+    if (columns[to].empty())
+    {
+        anim.toY = START_Y;
+    }
+    else
+    {
+        anim.toY =
+            calcCardY(
+                to,
+                columns[to].size()
+            );
+    }
+
+    anim.cards = temp;
+
+    anim.progress = 0.0f;
+
+    anim.active = true;
+
+    anim.targetCol = to;
+
+    // 删除原位置
     columns[from].erase(
         columns[from].begin() + start,
         columns[from].end()
     );
 
-    for (auto& c : temp)
-    {
-        columns[to].push_back(c);
-    }
-
+    // 翻开新牌
     if (!columns[from].empty())
     {
-        columns[from].back().isUp = true;
+        columns[from]
+            .back()
+            .isUp = true;
     }
-
-    autoRemove();
 }
 
 // ======================================================
@@ -627,7 +845,7 @@ void dealNewCards()
     {
         MessageBox(
             GetHWnd(),
-            L"牌堆已经空了！",
+            L"牌堆为空！",
             L"提示",
             MB_OK
         );
@@ -649,18 +867,24 @@ void dealNewCards()
 }
 
 // ======================================================
-// 鼠标点击牌
+// 点击牌
 // ======================================================
 
 bool clickCard(int mx, int my)
 {
     for (int c = COLS - 1; c >= 0; c--)
     {
-        int x = START_X + c * GAP_X;
+        int x =
+            START_X + c * GAP_X;
 
-        for (int i = (int)columns[c].size() - 1; i >= 0; i--)
+        for (
+            int i = (int)columns[c].size() - 1;
+            i >= 0;
+            i--
+            )
         {
-            int y = START_Y + i * GAP_Y;
+            int y =
+                calcCardY(c, i);
 
             if (mx >= x &&
                 mx <= x + CARD_W &&
@@ -681,9 +905,15 @@ bool clickCard(int mx, int my)
 
                 dragCards.clear();
 
-                for (int k = i; k < columns[c].size(); k++)
+                for (
+                    int k = i;
+                    k < columns[c].size();
+                    k++
+                    )
                 {
-                    dragCards.push_back(columns[c][k]);
+                    dragCards.push_back(
+                        columns[c][k]
+                    );
                 }
 
                 offsetX = mx - x;
@@ -706,9 +936,11 @@ int getColumn(int mx)
 {
     for (int c = 0; c < COLS; c++)
     {
-        int x = START_X + c * GAP_X;
+        int x =
+            START_X + c * GAP_X;
 
-        if (mx >= x && mx <= x + CARD_W)
+        if (mx >= x &&
+            mx <= x + CARD_W)
         {
             return c;
         }
@@ -735,6 +967,7 @@ int main()
     {
         drawGame();
 
+        // 胜利
         if (checkWin())
         {
             MessageBox(
@@ -752,7 +985,8 @@ int main()
         // Ctrl+Z
         if (GetAsyncKeyState('Z') & 0x8000)
         {
-            if (GetAsyncKeyState(VK_CONTROL) & 0x8000)
+            if (GetAsyncKeyState(VK_CONTROL)
+                & 0x8000)
             {
                 undo();
 
@@ -760,9 +994,32 @@ int main()
             }
         }
 
+        // 更新动画
+        if (anim.active)
+        {
+            anim.progress += 0.08f;
+
+            if (anim.progress >= 1.0f)
+            {
+                anim.progress = 1.0f;
+
+                // 动画结束
+                for (auto& c : anim.cards)
+                {
+                    columns[anim.targetCol]
+                        .push_back(c);
+                }
+
+                autoRemove();
+
+                anim.active = false;
+            }
+        }
+
         while (MouseHit())
         {
-            MOUSEMSG msg = GetMouseMsg();
+            MOUSEMSG msg =
+                GetMouseMsg();
 
             switch (msg.uMsg)
             {
@@ -775,6 +1032,7 @@ int main()
                     msg.y <= 55)
                 {
                     dealNewCards();
+
                     break;
                 }
 
@@ -785,10 +1043,14 @@ int main()
                     msg.y <= 55)
                 {
                     undo();
+
                     break;
                 }
 
-                clickCard(msg.x, msg.y);
+                clickCard(
+                    msg.x,
+                    msg.y
+                );
 
                 break;
             }
@@ -814,7 +1076,8 @@ int main()
                         if (canMove(
                             dragFromCol,
                             dragStartIndex,
-                            target))
+                            target
+                        ))
                         {
                             moveCards(
                                 dragFromCol,
