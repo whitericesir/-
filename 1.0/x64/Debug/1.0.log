@@ -1,0 +1,4 @@
+﻿  1.0.cpp
+C:\Users\yue\source\repos\1.0\1.0.cpp(245,15): warning C4267: “初始化”: 从“size_t”转换到“int”，可能丢失数据
+C:\Users\yue\source\repos\1.0\1.0.cpp(304,20): warning C4267: “初始化”: 从“size_t”转换到“int”，可能丢失数据
+  1.0.vcxproj -> C:\Users\yue\source\repos\1.0\x64\Debug\1.0.exe
